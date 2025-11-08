@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  # vLLM service (GPU-backed LLM server)
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-server
+    runtime: nvidia  # Requires nvidia-docker
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    command: >
+      --model meta-llama/Llama-2-7b-chat-hf
+      --host 0.0.0.0
+      --port 8100
+      --dtype auto
+      --max-model-len 4096
+    ports:
+      - "8100:8100"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # Internal LLM API Server
+  api-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-api-server
+    ports:
+      - "8000:8000"
+      - "9090:9090"  # Prometheus metrics
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    environment:
+      - VLLM_BASE_URL=http://vllm:8100/v1
+    depends_on:
+      vllm:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for distributed rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: llm-api-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:
+
+networks:
+  default:
+    name: llm-api-network

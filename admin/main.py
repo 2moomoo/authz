@@ -22,6 +22,8 @@ from shared.database import get_db, init_db
 from shared.models import APIKey, RequestLog
 from shared import crud
 from shared.config import settings
+from shared.email_service import get_email_service
+import random
 
 app = FastAPI(title="LLM API Admin Service", version="1.0.0")
 
@@ -75,6 +77,21 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+# Self-service auth models
+class EmailRequest(BaseModel):
+    email: str
+
+
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+class APIKeySuccessResponse(BaseModel):
+    api_key: str
+    message: str
 
 
 class UsageStats(BaseModel):
@@ -256,6 +273,148 @@ async def get_usage(
         for stat in stats
     ]
 
+
+# ============================================================================
+# Self-Service Auth API (for users to get their own API keys via email)
+# ============================================================================
+
+@app.post("/auth/request-code")
+async def request_verification_code(
+    request: EmailRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Request a verification code via email.
+
+    Users enter their company email and receive a 6-digit code.
+    """
+    email = request.email.lower().strip()
+
+    # Validate email format
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    # Check if email domain is allowed
+    domain = email.split("@")[1]
+    if domain not in settings.allowed_email_domains:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Email domain not allowed. Please use a company email address."
+        )
+
+    # Generate 6-digit code
+    code = f"{random.randint(100000, 999999)}"
+
+    # Calculate expiration
+    expires_at = datetime.utcnow() + timedelta(minutes=settings.verification_code_expire_minutes)
+
+    # Save to database
+    crud.create_verification_code(
+        db,
+        email=email,
+        code=code,
+        expires_at=expires_at,
+    )
+
+    # Send email
+    email_service = get_email_service()
+    success = email_service.send_verification_code(email, code)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send verification email")
+
+    # Clean up old expired codes (background task simulation)
+    crud.cleanup_expired_codes(db)
+
+    return {
+        "message": "Verification code sent to your email",
+        "expires_in_minutes": settings.verification_code_expire_minutes
+    }
+
+
+@app.post("/auth/verify-code", response_model=APIKeySuccessResponse)
+async def verify_code_and_get_api_key(
+    request: VerifyCodeRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Verify the code and issue an API key.
+
+    If the code is valid, automatically create an API key for the user.
+    """
+    email = request.email.lower().strip()
+    code = request.code.strip()
+
+    # Find valid verification code
+    verification = crud.get_valid_verification_code(db, email, code)
+
+    if not verification:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired verification code"
+        )
+
+    # Mark code as used
+    crud.mark_verification_code_used(db, verification.id)
+
+    # Check if user already has an API key
+    existing_keys = crud.get_api_keys_by_user(db, email)
+    active_keys = [k for k in existing_keys if k.is_active]
+
+    if active_keys:
+        # Return existing active key
+        return APIKeySuccessResponse(
+            api_key=active_keys[0].key,
+            message="You already have an active API key"
+        )
+
+    # Generate new API key
+    new_key = f"sk-internal-{secrets.token_urlsafe(32)}"
+
+    # Create API key with standard tier
+    api_key = crud.create_api_key(
+        db,
+        key=new_key,
+        user_id=email,
+        tier="standard",
+        description="Self-service registration",
+        created_by="self-service",
+    )
+
+    return APIKeySuccessResponse(
+        api_key=api_key.key,
+        message="API key created successfully! Please save this key, it won't be shown again."
+    )
+
+
+@app.get("/auth/my-keys", response_model=List[APIKeyResponse])
+async def get_my_keys(
+    email: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get all API keys for a specific user (by email).
+
+    Note: In production, this should require authentication.
+    For now, we just check by email.
+    """
+    email = email.lower().strip()
+
+    # Validate email domain
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    domain = email.split("@")[1]
+    if domain not in settings.allowed_email_domains:
+        raise HTTPException(status_code=400, detail="Email domain not allowed")
+
+    keys = crud.get_api_keys_by_user(db, email)
+    return keys
+
+
+# ============================================================================
+# Health Check
+# ============================================================================
 
 @app.get("/health")
 async def health():

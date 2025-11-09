@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: List[str] = ["*"]
 
+    # Email Verification
+    allowed_email_domains: List[str] = ["company.com", "company.co.kr"]  # Whitelist
+    verification_code_expire_minutes: int = 5
+    smtp_host: str = "localhost"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@company.com"
+    use_mock_email: bool = True  # Set to False in production with real SMTP
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

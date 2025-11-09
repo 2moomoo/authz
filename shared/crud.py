@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 from passlib.context import CryptContext
 
-from .models import APIKey, User, RequestLog, AdminUser
+from .models import APIKey, User, RequestLog, AdminUser, VerificationCode
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -171,3 +171,69 @@ def update_admin_last_login(db: Session, admin_id: int):
     if admin:
         admin.last_login = datetime.utcnow()
         db.commit()
+
+
+# Verification Code CRUD
+def create_verification_code(
+    db: Session,
+    email: str,
+    code: str,
+    expires_at: datetime,
+    ip_address: Optional[str] = None,
+) -> VerificationCode:
+    """Create a verification code."""
+    verification = VerificationCode(
+        email=email,
+        code=code,
+        expires_at=expires_at,
+        ip_address=ip_address,
+    )
+    db.add(verification)
+    db.commit()
+    db.refresh(verification)
+    return verification
+
+
+def get_valid_verification_code(db: Session, email: str, code: str) -> Optional[VerificationCode]:
+    """Get a valid (not expired, not used) verification code."""
+    now = datetime.utcnow()
+    return (
+        db.query(VerificationCode)
+        .filter(
+            VerificationCode.email == email,
+            VerificationCode.code == code,
+            VerificationCode.is_used == False,
+            VerificationCode.expires_at > now,
+        )
+        .first()
+    )
+
+
+def mark_verification_code_used(db: Session, verification_id: int):
+    """Mark verification code as used."""
+    verification = db.query(VerificationCode).filter(VerificationCode.id == verification_id).first()
+    if verification:
+        verification.is_used = True
+        db.commit()
+
+
+def cleanup_expired_codes(db: Session) -> int:
+    """Delete expired verification codes. Returns number of deleted codes."""
+    now = datetime.utcnow()
+    count = (
+        db.query(VerificationCode)
+        .filter(VerificationCode.expires_at < now)
+        .delete()
+    )
+    db.commit()
+    return count
+
+
+def get_api_keys_by_user(db: Session, user_id: str) -> List[APIKey]:
+    """Get all API keys for a specific user (email)."""
+    return (
+        db.query(APIKey)
+        .filter(APIKey.user_id == user_id)
+        .order_by(desc(APIKey.created_at))
+        .all()
+    )

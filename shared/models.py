@@ -69,3 +69,21 @@ class AdminUser(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_login = Column(DateTime, nullable=True)
+
+
+class VerificationCode(Base):
+    """Email verification code for self-service API key registration."""
+    __tablename__ = "verification_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), index=True, nullable=False)
+    code = Column(String(10), nullable=False)  # 6-digit code
+    is_used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)  # 5 minutes from creation
+    ip_address = Column(String(50), nullable=True)  # For security tracking
+
+    __table_args__ = (
+        Index("idx_email_code", "email", "code"),
+        Index("idx_expires_at", "expires_at"),
+    )

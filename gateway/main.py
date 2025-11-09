@@ -222,6 +222,35 @@ async def llm_api_proxy(
     return await proxy_to_llm_backend(request, f"v1/{path}", api_key_info, db)
 
 
+# Auth API Routes (self-service, no authentication required)
+@app.api_route("/auth/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def auth_api_proxy(path: str, request: Request):
+    """Proxy all /auth/* requests to Admin service (self-service endpoints)."""
+    url = f"http://{settings.admin_host}:{settings.admin_port}/auth/{path}"
+
+    # Get request body
+    body = await request.body()
+
+    try:
+        # Forward request with all headers
+        response = await http_client.request(
+            method=request.method,
+            url=url,
+            content=body,
+            headers=dict(request.headers),
+        )
+
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.headers.get("Content-Type"),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Auth service error: {str(e)}")
+
+
 # Admin API Routes (proxy without LLM auth, admin service handles its own auth)
 @app.api_route("/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def admin_api_proxy(path: str, request: Request):
@@ -251,7 +280,27 @@ async def admin_api_proxy(path: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Admin service error: {str(e)}")
 
 
-# Serve Admin UI
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint - redirect to user self-service portal."""
+    return {
+        "service": "LLM API Gateway",
+        "version": "1.0.0",
+        "portals": {
+            "user": f"http://localhost:{settings.gateway_port}/admin/user.html",
+            "admin": f"http://localhost:{settings.gateway_port}/admin/index.html"
+        },
+        "endpoints": {
+            "health": "/health",
+            "llm_api": "/v1/*",
+            "self_service_auth": "/auth/*",
+            "admin_api": "/admin/api/*",
+        },
+    }
+
+
+# Admin UI shortcut
 @app.get("/admin")
 async def admin_ui():
     """Redirect to admin UI."""
@@ -259,21 +308,6 @@ async def admin_ui():
         content={"message": "Admin UI", "url": f"http://localhost:{settings.gateway_port}/admin/index.html"}
     )
 
-
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "service": "LLM API Gateway",
-        "version": "1.0.0",
-        "endpoints": {
-            "health": "/health",
-            "llm_api": "/v1/*",
-            "admin_api": "/admin/api/*",
-            "admin_ui": "/admin/",
-        },
-    }
 
 
 if __name__ == "__main__":

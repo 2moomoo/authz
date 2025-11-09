@@ -36,7 +36,7 @@ services:
   llm-backend:
     build:
       context: .
-      dockerfile: Dockerfile.llm-backend
+      dockerfile: llm_backend/Dockerfile
     container_name: llm-backend
     ports:
       - "8001:8001"
@@ -60,7 +60,7 @@ services:
   admin:
     build:
       context: .
-      dockerfile: Dockerfile.admin
+      dockerfile: admin/Dockerfile
     container_name: admin-service
     ports:
       - "8002:8002"
@@ -83,7 +83,7 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: Dockerfile.gateway
+      dockerfile: gateway/Dockerfile
     container_name: gateway-service
     ports:
       - "8000:8000"

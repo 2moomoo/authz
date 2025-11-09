@@ -32,23 +32,73 @@ services:
       retries: 5
       start_period: 120s
 
-  # Internal LLM API Server
-  api-server:
+  # LLM Backend Service (vLLM Proxy)
+  llm-backend:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: llm-api-server
+      dockerfile: Dockerfile.llm-backend
+    container_name: llm-backend
     ports:
-      - "8000:8000"
-      - "9090:9090"  # Prometheus metrics
-    volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - ./logs:/app/logs
-      - ./.env:/app/.env:ro
+      - "8001:8001"
     environment:
       - VLLM_BASE_URL=http://vllm:8100/v1
+      - VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf
     depends_on:
       vllm:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - llm-api-network
+
+  # Admin Service (API Key Management)
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+    container_name: admin-service
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./llm_api.db:/app/llm_api.db
+    environment:
+      - DATABASE_URL=sqlite:///./llm_api.db
+      - ADMIN_SECRET_KEY=change-this-secret-key-in-production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - llm-api-network
+
+  # Gateway Service (Auth + Routing)
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: gateway-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./llm_api.db:/app/llm_api.db
+    environment:
+      - DATABASE_URL=sqlite:///./llm_api.db
+      - LLM_BACKEND_URL=http://llm-backend:8001
+      - ADMIN_HOST=admin
+      - ADMIN_PORT=8002
+      - VLLM_BASE_URL=http://vllm:8100/v1
+    depends_on:
+      llm-backend:
+        condition: service_healthy
+      admin:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -57,26 +107,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Optional: Redis for distributed rate limiting
-  redis:
-    image: redis:7-alpine
-    container_name: llm-api-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    command: redis-server --appendonly yes
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  redis-data:
+    networks:
+      - llm-api-network
 
 networks:
-  default:
-    name: llm-api-network
+  llm-api-network:
+    driver: bridge

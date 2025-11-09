@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     llm_backend_url: str = "http://localhost:8001"
 
     # vLLM
-    vllm_base_url: str = "http://localhost:8100/v1"
+    vllm_base_url: str = "http://localhost:8100"
     vllm_default_model: str = "meta-llama/Llama-2-7b-chat-hf"
 
     # Security

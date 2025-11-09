@@ -41,7 +41,7 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - VLLM_BASE_URL=http://vllm:8100/v1
+      - VLLM_BASE_URL=http://vllm:8100
       - VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf
     depends_on:
       vllm:
@@ -94,7 +94,7 @@ services:
       - LLM_BACKEND_URL=http://llm-backend:8001
       - ADMIN_HOST=admin
       - ADMIN_PORT=8002
-      - VLLM_BASE_URL=http://vllm:8100/v1
+      - VLLM_BASE_URL=http://vllm:8100
     depends_on:
       llm-backend:
         condition: service_healthy

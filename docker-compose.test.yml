@@ -1,0 +1,61 @@
+version: '3.8'
+
+# Minimal test setup - services only, no healthchecks, no vLLM dependency
+# Usage: docker compose -f docker-compose.test.yml up --build
+
+services:
+  # Admin Service
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    container_name: admin-service-test
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./llm_api.db:/app/llm_api.db
+    environment:
+      - DATABASE_URL=sqlite:///./llm_api.db
+      - ADMIN_SECRET_KEY=test-secret-key
+      - USE_MOCK_EMAIL=true
+    networks:
+      - test-network
+
+  # LLM Backend Service (will fail gracefully without vLLM)
+  llm-backend:
+    build:
+      context: .
+      dockerfile: llm_backend/Dockerfile
+    container_name: llm-backend-test
+    ports:
+      - "8001:8001"
+    environment:
+      - VLLM_BASE_URL=http://localhost:8100
+      - VLLM_DEFAULT_MODEL=test-model
+    networks:
+      - test-network
+
+  # Gateway Service
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: gateway-test
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./llm_api.db:/app/llm_api.db
+    environment:
+      - DATABASE_URL=sqlite:///./llm_api.db
+      - LLM_BACKEND_URL=http://llm-backend:8001
+      - ADMIN_HOST=admin
+      - ADMIN_PORT=8002
+    depends_on:
+      - llm-backend
+      - admin
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

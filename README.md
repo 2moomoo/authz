@@ -328,7 +328,7 @@ LLM_BACKEND_PORT=8001
 LLM_BACKEND_URL=http://localhost:8001
 
 # vLLM
-VLLM_BASE_URL=http://localhost:8100/v1
+VLLM_BASE_URL=http://localhost:8100
 VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf
 
 # Rate Limits

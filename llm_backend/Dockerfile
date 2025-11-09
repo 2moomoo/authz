@@ -1,43 +1,20 @@
-FROM python:3.11-slim as builder
-
-WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install Python dependencies
-COPY llm_backend/requirements.txt ./llm_backend/
-COPY shared/requirements.txt ./shared/
-RUN pip install --no-cache-dir --user -r llm_backend/requirements.txt -r shared/requirements.txt
-
-# Final stage
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies only
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -m -u 1000 appuser
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /home/appuser/.local
+# Copy requirements
+COPY llm_backend/requirements.txt ./llm_backend/
+COPY shared/requirements.txt ./shared/
+RUN pip install --no-cache-dir -r llm_backend/requirements.txt -r shared/requirements.txt
 
 # Copy application code
 COPY llm_backend/ ./llm_backend/
 COPY shared/ ./shared/
-
-# Set ownership
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
-
-# Add local bin to PATH
-ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Expose port
 EXPOSE 8001

@@ -45,3 +45,18 @@ Thumbs.db
 # Project specific
 api_keys.yaml
 secrets.yaml
+*.db
+*.db-journal
+llm_api.db
+
+# Type checking
+.mypy_cache/
+.pytype/
+.pyre/
+.pyright/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Podman으로 GPU 사용하여 전체 시스템 실행
+# Podman으로 GPU 사용하여 전체 시스템 실행 (네트워크 문제 수정)
 
 echo "=========================================="
 echo "Podman + GPU로 LLM API 실행"
@@ -12,13 +12,17 @@ podman stop vllm-server llm-backend admin-service gateway-service 2>/dev/null
 podman rm vllm-server llm-backend admin-service gateway-service 2>/dev/null
 echo
 
+# 0.5. 네트워크 생성 (rootful로 실행)
+echo "[0.5] 네트워크 생성"
+podman network create llm-api-network 2>/dev/null || echo "네트워크 이미 존재 또는 생성 실패 (무시)"
+echo
+
 # 1. vLLM GPU로 실행
 echo "[1] vLLM 서버 시작 (GPU)"
 podman run -d \
   --name vllm-server \
   --device nvidia.com/gpu=all \
   -p 8100:8100 \
-  --network llm-api-network \
   vllm/vllm-openai:latest \
   --model meta-llama/Llama-2-7b-chat-hf \
   --host 0.0.0.0 \
@@ -29,22 +33,18 @@ podman run -d \
 echo "vLLM 시작 중... (30초 대기)"
 sleep 30
 
-# 2. 네트워크 생성 (없으면)
-podman network create llm-api-network 2>/dev/null || true
-
-# 3. 나머지 서비스 빌드
+# 2. 나머지 서비스 빌드
 echo
 echo "[2] 다른 서비스 빌드"
 podman build -t authz-admin:latest -f admin/Dockerfile .
 podman build -t authz-llm-backend:latest -f llm_backend/Dockerfile .
 podman build -t authz-gateway:latest -f gateway/Dockerfile .
 
-# 4. Admin 서비스
+# 3. Admin 서비스
 echo
 echo "[3] Admin 서비스 시작"
 podman run -d \
   --name admin-service \
-  --network llm-api-network \
   -p 8002:8002 \
   -v db-data:/app \
   -e DATABASE_URL=sqlite:///./llm_api.db \
@@ -52,30 +52,31 @@ podman run -d \
   -e USE_MOCK_EMAIL=true \
   authz-admin:latest
 
-# 5. LLM Backend 서비스
+# 4. LLM Backend 서비스
 echo
 echo "[4] LLM Backend 서비스 시작"
 podman run -d \
   --name llm-backend \
-  --network llm-api-network \
+  --add-host=vllm-server:host-gateway \
   -p 8001:8001 \
-  -e VLLM_BASE_URL=http://vllm-server:8100 \
+  -e VLLM_BASE_URL=http://host.containers.internal:8100 \
   -e VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf \
   authz-llm-backend:latest
 
-# 6. Gateway 서비스
+# 5. Gateway 서비스
 echo
 echo "[5] Gateway 서비스 시작"
 podman run -d \
   --name gateway-service \
-  --network llm-api-network \
+  --add-host=llm-backend:host-gateway \
+  --add-host=admin-service:host-gateway \
   -p 8000:8000 \
   -v db-data:/app \
   -e DATABASE_URL=sqlite:///./llm_api.db \
-  -e LLM_BACKEND_URL=http://llm-backend:8001 \
-  -e ADMIN_HOST=admin-service \
+  -e LLM_BACKEND_URL=http://host.containers.internal:8001 \
+  -e ADMIN_HOST=host.containers.internal \
   -e ADMIN_PORT=8002 \
-  -e VLLM_BASE_URL=http://vllm-server:8100 \
+  -e VLLM_BASE_URL=http://host.containers.internal:8100 \
   authz-gateway:latest
 
 echo

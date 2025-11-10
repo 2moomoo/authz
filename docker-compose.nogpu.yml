@@ -1,0 +1,71 @@
+version: '3.8'
+
+# GPU 없이 테스트하기 위한 설정
+# vLLM을 제외한 모든 서비스 실행
+# Usage: docker compose -f docker-compose.nogpu.yml up --build
+
+services:
+  # LLM Backend Service (vLLM 없이 동작, health check는 실패하지만 API는 응답)
+  llm-backend:
+    build:
+      context: .
+      dockerfile: llm_backend/Dockerfile
+    container_name: llm-backend
+    ports:
+      - "8001:8001"
+    environment:
+      # 존재하지 않는 vLLM 서버를 가리킴 (health check 실패하지만 서비스는 시작됨)
+      - VLLM_BASE_URL=http://localhost:8100
+      - VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf
+    restart: unless-stopped
+    networks:
+      - llm-api-network
+
+  # Admin Service (API Key Management)
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    container_name: admin-service
+    ports:
+      - "8002:8002"
+    volumes:
+      - db-data:/app
+    environment:
+      - DATABASE_URL=sqlite:///./llm_api.db
+      - ADMIN_SECRET_KEY=change-this-secret-key-in-production
+      - USE_MOCK_EMAIL=true
+    restart: unless-stopped
+    networks:
+      - llm-api-network
+
+  # Gateway Service (Auth + Routing)
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: gateway-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - db-data:/app
+    environment:
+      - DATABASE_URL=sqlite:///./llm_api.db
+      - LLM_BACKEND_URL=http://llm-backend:8001
+      - ADMIN_HOST=admin
+      - ADMIN_PORT=8002
+      - VLLM_BASE_URL=http://localhost:8100
+    depends_on:
+      - llm-backend
+      - admin
+    restart: unless-stopped
+    networks:
+      - llm-api-network
+
+networks:
+  llm-api-network:
+    driver: bridge
+
+volumes:
+  db-data:
+    driver: local

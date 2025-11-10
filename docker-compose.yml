@@ -17,7 +17,7 @@ services:
     ports:
       - "8100:8100"
     volumes:
-      - ~/.cache/huggingface:/root/.cache/huggingface
+      - huggingface-cache:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -65,7 +65,7 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ./llm_api.db:/app/llm_api.db
+      - db-data:/app
     environment:
       - DATABASE_URL=sqlite:///./llm_api.db
       - ADMIN_SECRET_KEY=change-this-secret-key-in-production
@@ -88,7 +88,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./llm_api.db:/app/llm_api.db
+      - db-data:/app
     environment:
       - DATABASE_URL=sqlite:///./llm_api.db
       - LLM_BACKEND_URL=http://llm-backend:8001
@@ -113,3 +113,9 @@ services:
 networks:
   llm-api-network:
     driver: bridge
+
+volumes:
+  huggingface-cache:
+    driver: local
+  db-data:
+    driver: local

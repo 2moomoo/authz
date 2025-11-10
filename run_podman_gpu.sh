@@ -6,6 +6,12 @@ echo "Podman + GPU로 LLM API 실행"
 echo "=========================================="
 echo
 
+# 0. 기존 컨테이너 정리 (있으면)
+echo "[0] 기존 컨테이너 정리"
+podman stop vllm-server llm-backend admin-service gateway-service 2>/dev/null
+podman rm vllm-server llm-backend admin-service gateway-service 2>/dev/null
+echo
+
 # 1. vLLM GPU로 실행
 echo "[1] vLLM 서버 시작 (GPU)"
 podman run -d \

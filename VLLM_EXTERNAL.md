@@ -34,6 +34,8 @@ vLLM이 `localhost:8100`에서 실행 중일 때:
 
 만 실행합니다.
 
+**중요**: 컨테이너에서 호스트의 vLLM에 접근하기 위해 `host.containers.internal:8100`을 사용합니다.
+
 ## 확인
 
 ### 1. vLLM 확인

@@ -14,7 +14,7 @@ Gateway (포트 8000)
 
 ## 실행 방법
 
-### 1. vLLM 먼저 실행
+### 1. vLLM 먼저 실행 (호스트 머신에서)
 ```bash
 # vLLM 설치 후
 python -m vllm.entrypoints.openai.api_server \
@@ -27,6 +27,8 @@ python -m vllm.entrypoints.openai.api_server \
 ```bash
 ./run_simple.sh
 ```
+
+**중요**: 컨테이너에서 호스트의 vLLM에 접근하기 위해 `host.containers.internal:8100`을 사용합니다.
 
 ## 서비스 역할
 

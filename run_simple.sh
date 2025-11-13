@@ -49,8 +49,8 @@ podman run -d \
   -p 8000:8000 \
   -v db-data:/app \
   -e DATABASE_URL=sqlite:///./llm_api.db \
-  -e LLM_BACKEND_URL=http://localhost:8100 \
-  -e ADMIN_HOST=localhost \
+  -e LLM_BACKEND_URL=http://host.containers.internal:8100 \
+  -e ADMIN_HOST=host.containers.internal \
   -e ADMIN_PORT=8002 \
   authz-gateway:latest
 

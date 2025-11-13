@@ -47,7 +47,7 @@ echo "[3] LLM Backend 서비스 시작"
 podman run -d \
   --name llm-backend \
   -p 8001:8001 \
-  -e VLLM_BASE_URL=http://localhost:8100 \
+  -e VLLM_BASE_URL=http://host.containers.internal:8100 \
   -e VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf \
   authz-llm-backend:latest
 
@@ -65,10 +65,10 @@ podman run -d \
   -p 8000:8000 \
   -v db-data:/app \
   -e DATABASE_URL=sqlite:///./llm_api.db \
-  -e LLM_BACKEND_URL=http://localhost:8001 \
-  -e ADMIN_HOST=localhost \
+  -e LLM_BACKEND_URL=http://host.containers.internal:8001 \
+  -e ADMIN_HOST=host.containers.internal \
   -e ADMIN_PORT=8002 \
-  -e VLLM_BASE_URL=http://localhost:8100 \
+  -e VLLM_BASE_URL=http://host.containers.internal:8100 \
   authz-gateway:latest
 
 if [ $? -eq 0 ]; then

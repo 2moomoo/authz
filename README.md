@@ -1,183 +1,149 @@
-# Internal LLM API Platform
+# Internal LLM API Platform (Simple Version)
 
-완전한 마이크로서비스 아키텍처 기반의 사내 LLM API 플랫폼입니다. OpenAI 호환 API, 관리자 대시보드, 인증 게이트웨이를 포함합니다.
+사내 LLM API 플랫폼 - OpenAI 호환 API, 셀프 서비스 API 키 발급, Rate Limiting 포함
 
 ## 아키텍처
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                    Client (직원)                      │
-│              IDE / Script / Browser                   │
-└────────────────────┬─────────────────────────────────┘
-                     ↓
-┌────────────────────────────────────────────────────────┐
-│                  Gateway Service                        │
-│                   (Port 8000)                          │
-│  ┌──────────────────────────────────────────────┐     │
-│  │  • API Key 인증                               │     │
-│  │  • Rate Limiting                              │     │
-│  │  • Request Logging                            │     │
-│  │  • Path-based Routing                         │     │
-│  └──────────────────────────────────────────────┘     │
-└──────┬────────────────────────┬────────────────────────┘
-       │                        │
-       ↓                        ↓
-┌──────────────┐         ┌──────────────┐
-│    Admin     │         │ LLM Backend  │
-│   Service    │         │   Service    │
-│  (Port 8002) │         │  (Port 8001) │
-│              │         │              │
-│ • API Key    │         │ • vLLM Proxy │
-│   관리 UI     │         │ • /v1/...    │
-│ • 사용량 통계  │         │   endpoints  │
-│ • REST API   │         │              │
-└──────┬───────┘         └──────┬───────┘
-       │                        │
-       ↓                        ↓
-┌────────────┐           ┌─────────┐
-│  Database  │           │  vLLM   │
-│  (SQLite)  │           │ Server  │
-│            │           │(Port    │
-│ • API Keys │           │ 8100)   │
-│ • Users    │           │         │
-│ • Logs     │           │  GPU    │
-└────────────┘           └─────────┘
+사용자 → Gateway (:8000) → vLLM (:8100) [별도 설치]
+           ↓
+        Admin (:8002)
+```
+
+### 주요 특징
+- ✅ OpenAI 호환 API (Chat Completions, Models 등)
+- ✅ 이메일 인증 기반 Self-Service API 키 발급
+- ✅ Admin 대시보드
+- ✅ Tier별 Rate Limiting (Free/Standard/Premium)
+- ✅ 간단한 2-서비스 구조 (Gateway + Admin)
+
+## 빠른 시작
+
+### 사전 준비: vLLM 설치 및 실행
+
+모든 실행 방법 공통으로 vLLM을 먼저 실행해야 합니다.
+
+```bash
+# vLLM 설치
+pip install vllm
+
+# vLLM 실행 (GPU 사용)
+python -m vllm.entrypoints.openai.api_server \
+  --model meta-llama/Llama-2-7b-chat-hf \
+  --host 0.0.0.0 \
+  --port 8100
+
+# vLLM 확인
+curl http://localhost:8100/v1/models
+```
+
+### 방법 1: Docker Compose (권장)
+
+가장 간단한 방법입니다.
+
+```bash
+# 서비스 시작
+docker compose up -d
+
+# 로그 확인
+docker compose logs -f
+
+# 서비스 중지
+docker compose down
+```
+
+### 방법 2: 로컬 실행 (개발용)
+
+Python 가상환경에서 직접 실행합니다.
+
+```bash
+# 서비스 시작 (자동으로 의존성 설치)
+./run_local.sh
+
+# 로그 확인
+tail -f logs/gateway.log
+tail -f logs/admin.log
+
+# 서비스 중지
+pkill -f 'uvicorn admin.main:app'
+pkill -f 'uvicorn gateway.main:app'
+```
+
+### 방법 3: Podman (선택사항)
+
+Podman을 사용하는 경우:
+
+```bash
+./run_simple.sh
 ```
 
 ## 서비스 구성
 
-### 1. Gateway Service (Port 8000)
-- **역할**: 인증, Rate Limiting, 라우팅
-- **기능**:
-  - API Key 검증 (Database)
-  - 사용자별 Rate Limiting
-  - Request/Response 로깅
-  - `/v1/*` → LLM Backend로 프록시
-  - `/admin/*` → Admin Service로 프록시
+### Gateway Service (Port 8000)
+**역할**: 인증, Rate Limiting, vLLM 프록시
 
-### 2. Admin Service (Port 8002)
-- **역할**: API Key 관리
-- **기능**:
-  - 웹 UI 대시보드
-  - API Key CRUD
-  - 사용량 통계 조회
-  - 관리자 인증 (JWT)
-- **접근**: `http://localhost:8000/admin/` (Gateway를 통해)
+**기능**:
+- API Key 검증
+- Tier별 Rate Limiting
+- Request/Response 로깅
+- `/v1/*` → vLLM으로 직접 프록시
+- `/admin/*` → Admin Service로 프록시
 
-### 3. LLM Backend Service (Port 8001)
-- **역할**: vLLM 프록시
-- **기능**:
-  - `/v1/completions`
-  - `/v1/chat/completions`
-  - `/v1/models`
-- **특징**: 인증 없음 (Gateway가 처리), Internal Only
+### Admin Service (Port 8002)
+**역할**: API Key 관리, Self-Service 포털
 
-### 4. vLLM Server (Port 8100)
-- GPU 기반 LLM 추론 서버
-- OpenAI 호환 API 제공
+**기능**:
+- 관리자 대시보드 (`/admin/index.html`)
+- Self-Service 포털 (`/user/`)
+- 이메일 인증 기반 API 키 발급
+- API Key CRUD
+- 사용량 통계
 
-## 빠른 시작
-
-### Docker Compose (추천)
-
-```bash
-# 전체 서비스 시작
-docker-compose up -d
-
-# 로그 확인
-docker-compose logs -f
-
-# 특정 서비스 로그
-docker-compose logs -f gateway
-docker-compose logs -f admin
-docker-compose logs -f llm-backend
-
-# 서비스 상태 확인
-curl http://localhost:8000/health
-```
-
-### 개별 서비스 실행 (개발용)
-
-```bash
-# 의존성 설치
-pip install -r gateway/requirements.txt
-pip install -r admin/requirements.txt
-pip install -r llm_backend/requirements.txt
-pip install -r shared/requirements.txt
-
-# 각 터미널에서 실행
-
-# Terminal 1: Admin Service
-python -m uvicorn admin.main:app --host 0.0.0.0 --port 8002
-
-# Terminal 2: LLM Backend
-python -m uvicorn llm_backend.main_simple:app --host 0.0.0.0 --port 8001
-
-# Terminal 3: Gateway
-python -m uvicorn gateway.main:app --host 0.0.0.0 --port 8000
-```
+### vLLM Server (Port 8100)
+**역할**: LLM 추론 (별도 설치)
 
 ## 사용 가이드
 
-### 1. 관리자 로그인
+### 방법 1: Self-Service (일반 사용자)
+
+```bash
+# 1. 브라우저에서 접속
+http://localhost:8002/user/
+
+# 2. 회사 이메일 입력 (예: user@company.com)
+# 3. 이메일로 받은 인증 코드 입력
+# 4. API Key 발급 (Tier 선택 가능)
+```
+
+**참고**: Mock 이메일 모드가 활성화되어 있으면 인증 코드가 서버 로그에 출력됩니다.
+
+### 방법 2: Admin 대시보드
 
 ```bash
 # 브라우저에서 접속
-http://localhost:8000/admin/index.html
+http://localhost:8002/admin/index.html
 
 # 기본 계정
 Username: admin
 Password: admin123
 ```
 
-**⚠️ 프로덕션 환경에서는 반드시 비밀번호를 변경하세요!**
+**⚠️ 프로덕션에서는 반드시 비밀번호를 변경하세요!**
 
-### 2. API Key 생성
-
-웹 UI에서:
-1. "Create New Key" 버튼 클릭
-2. User ID 입력 (예: `dev-team`)
-3. Tier 선택 (Free/Standard/Premium)
-4. 설명 입력 (선택)
-5. 만료일 설정 (선택)
-6. "Create" 클릭
-7. 생성된 API Key 복사 (다시 보이지 않음!)
-
-또는 API로:
-
-```bash
-# 로그인
-TOKEN=$(curl -X POST http://localhost:8000/admin/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' \
-  | jq -r '.access_token')
-
-# API Key 생성
-curl -X POST http://localhost:8000/admin/api/keys \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "dev-team",
-    "tier": "premium",
-    "description": "Development team key"
-  }'
-```
-
-### 3. LLM API 사용
+### API 사용 예시
 
 #### Chat Completion
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-internal-YOUR-KEY-HERE" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
     "model": "meta-llama/Llama-2-7b-chat-hf",
     "messages": [
-      {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "Hello!"}
     ],
-    "max_tokens": 100
+    "max_tokens": 50
   }'
 ```
 
@@ -187,7 +153,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-internal-YOUR-KEY-HERE",
+    api_key="YOUR_API_KEY",
     base_url="http://localhost:8000/v1"
 )
 
@@ -203,8 +169,6 @@ print(response.choices[0].message.content)
 
 ## Rate Limiting
 
-Tier별 요청 제한:
-
 | Tier | 분당 요청 | 시간당 요청 |
 |------|----------|-----------|
 | Free | 10 | 100 |
@@ -212,7 +176,6 @@ Tier별 요청 제한:
 | Premium | 100 | 1000 |
 
 Rate limit 정보는 응답 헤더에 포함:
-
 ```
 X-RateLimit-Limit-Minute: 100
 X-RateLimit-Remaining-Minute: 95
@@ -220,138 +183,83 @@ X-RateLimit-Limit-Hour: 1000
 X-RateLimit-Remaining-Hour: 998
 ```
 
-## API 엔드포인트
+## 테스트
 
-### Gateway (Port 8000)
+```bash
+# 통합 테스트 (권장)
+python3 test_system.py
 
-| 엔드포인트 | 설명 | 인증 필요 |
-|----------|------|----------|
-| `GET /health` | 전체 시스템 상태 | ❌ |
-| `POST /v1/chat/completions` | Chat 완성 | ✅ API Key |
-| `POST /v1/completions` | Text 완성 | ✅ API Key |
-| `GET /v1/models` | 모델 목록 | ✅ API Key |
-| `GET /admin/index.html` | 관리자 UI | ❌ |
-| `POST /admin/api/login` | 관리자 로그인 | ❌ |
-| `GET /admin/api/keys` | API Key 목록 | ✅ Admin Token |
-| `POST /admin/api/keys` | API Key 생성 | ✅ Admin Token |
-| `PUT /admin/api/keys/{id}` | API Key 수정 | ✅ Admin Token |
-| `DELETE /admin/api/keys/{id}` | API Key 삭제 | ✅ Admin Token |
-| `GET /admin/api/usage` | 사용량 통계 | ✅ Admin Token |
+# 헬스 체크
+curl http://localhost:8000/health
+curl http://localhost:8002/health
+```
 
 ## 프로젝트 구조
 
 ```
 authz/
-├── gateway/                    # Gateway Service
-│   ├── main.py                # FastAPI app with routing
-│   ├── auth.py                # API key authentication
-│   ├── rate_limiter.py        # Rate limiting logic
+├── gateway/                  # Gateway Service
+│   ├── main.py              # FastAPI app
+│   ├── auth.py              # API key authentication
+│   ├── rate_limiter.py      # Rate limiting
 │   ├── requirements.txt
-│   └── Dockerfile.gateway
+│   └── Dockerfile
 │
-├── admin/                     # Admin Service
-│   ├── main.py               # Admin API
-│   ├── ui/                   # Web UI
-│   │   ├── index.html        # Dashboard HTML
-│   │   └── app.js            # Dashboard JavaScript
+├── admin/                   # Admin Service
+│   ├── main.py             # Admin API + UI
+│   ├── ui/                 # Web UI files
+│   │   ├── index.html      # Admin dashboard
+│   │   ├── app.js
+│   │   ├── user.html       # Self-service portal
+│   │   └── user.js
 │   ├── requirements.txt
-│   └── Dockerfile.admin
+│   └── Dockerfile
 │
-├── llm_backend/              # LLM Backend Service
-│   ├── main_simple.py        # vLLM proxy (no auth)
-│   ├── vllm_client.py        # vLLM HTTP client
-│   ├── models.py             # Pydantic models
-│   ├── requirements.txt
-│   └── Dockerfile.llm-backend
-│
-├── shared/                   # 공통 라이브러리
-│   ├── database.py           # SQLAlchemy setup
-│   ├── models.py             # DB models
-│   ├── crud.py               # CRUD operations
-│   ├── config.py             # 공통 설정
+├── shared/                 # 공통 라이브러리
+│   ├── database.py         # SQLAlchemy
+│   ├── models.py           # DB models
+│   ├── crud.py             # CRUD operations
+│   ├── config.py           # 설정
+│   ├── email_service.py    # 이메일 인증
 │   └── requirements.txt
 │
-├── docker-compose.yml        # 전체 오케스트레이션
-├── .env.example              # 환경 변수 템플릿
-└── README.md                 # 이 문서
-```
-
-## 데이터베이스 스키마
-
-### API Keys 테이블
-- `id`: Primary key
-- `key`: API key string (unique)
-- `user_id`: 사용자 ID
-- `tier`: free/standard/premium
-- `is_active`: 활성화 상태
-- `created_at`, `updated_at`: 타임스탬프
-- `expires_at`: 만료일 (선택)
-- `description`: 설명
-
-### Request Logs 테이블
-- `id`: Primary key
-- `user_id`: 사용자 ID
-- `api_key_id`: API Key ID
-- `endpoint`: API 경로
-- `method`: HTTP method
-- `status_code`: 응답 코드
-- `duration_ms`: 소요 시간
-- `prompt_tokens`, `completion_tokens`: 토큰 사용량
-- `model`: 사용한 모델
-- `timestamp`: 요청 시각
-
-### Admin Users 테이블
-- `id`: Primary key
-- `username`: 관리자 아이디
-- `hashed_password`: 해시된 비밀번호
-- `email`: 이메일
-- `is_active`: 활성화 상태
-- `last_login`: 마지막 로그인
-
-## 환경 변수
-
-`.env` 파일:
-
-```bash
-# Database
-DATABASE_URL=sqlite:///./llm_api.db
-
-# Gateway
-GATEWAY_PORT=8000
-
-# Admin
-ADMIN_PORT=8002
-ADMIN_SECRET_KEY=your-secret-key-here
-
-# LLM Backend
-LLM_BACKEND_PORT=8001
-LLM_BACKEND_URL=http://localhost:8001
-
-# vLLM
-VLLM_BASE_URL=http://localhost:8100
-VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf
-
-# Rate Limits
-RATE_LIMIT_PREMIUM_PER_MINUTE=100
-RATE_LIMIT_PREMIUM_PER_HOUR=1000
-RATE_LIMIT_STANDARD_PER_MINUTE=30
-RATE_LIMIT_STANDARD_PER_HOUR=300
-RATE_LIMIT_FREE_PER_MINUTE=10
-RATE_LIMIT_FREE_PER_HOUR=100
+├── docker-compose.yml      # Docker Compose 설정
+├── run_local.sh           # 로컬 실행 스크립트 (개발용)
+├── run_simple.sh          # Podman 실행 스크립트 (선택)
+├── test_system.py         # 통합 테스트
+├── .env.example           # 환경 변수 예시
+├── SIMPLE_VERSION.md      # 상세 가이드
+└── README.md             # 이 문서
 ```
 
 ## 모니터링
 
 ### 로그 확인
 
+**Docker Compose:**
 ```bash
-# Docker 로그
-docker-compose logs -f gateway
-docker-compose logs -f admin
-docker-compose logs -f llm-backend
+# 전체 로그
+docker compose logs -f
 
-# 로그 파일 (개별 실행 시)
+# 특정 서비스 로그
+docker compose logs -f gateway
+docker compose logs -f admin
+```
+
+**로컬 실행:**
+```bash
+# 로그 파일 확인
 tail -f logs/gateway.log
+tail -f logs/admin.log
+
+# 실시간 모니터링
+watch -n 2 "tail -20 logs/gateway.log"
+```
+
+**Podman:**
+```bash
+podman logs --tail 100 gateway-service
+podman logs --tail 100 admin-service
 ```
 
 ### Health Checks
@@ -361,18 +269,71 @@ tail -f logs/gateway.log
 curl http://localhost:8000/health
 
 # 개별 서비스
-curl http://localhost:8001/health  # LLM Backend
 curl http://localhost:8002/health  # Admin
 ```
 
-### 사용량 통계
+## 관리
 
-웹 UI의 Dashboard 또는:
+### Docker Compose
 
 ```bash
-curl http://localhost:8000/admin/api/usage?days=7 \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
+# 서비스 중지
+docker compose stop
+
+# 서비스 재시작
+docker compose restart
+
+# 서비스 삭제 (볼륨 유지)
+docker compose down
+
+# 서비스 삭제 (볼륨 포함)
+docker compose down -v
+
+# 재빌드
+docker compose build
+docker compose up -d
 ```
+
+### 로컬 실행
+
+```bash
+# 서비스 중지
+pkill -f 'uvicorn admin.main:app'
+pkill -f 'uvicorn gateway.main:app'
+
+# 또는 PID 파일 사용
+kill $(cat logs/admin.pid)
+kill $(cat logs/gateway.pid)
+
+# 재시작
+./run_local.sh
+```
+
+### Podman
+
+```bash
+# 서비스 중지
+podman stop gateway-service admin-service
+
+# 서비스 재시작
+podman restart gateway-service admin-service
+
+# 재빌드
+./run_simple.sh
+```
+
+## 환경 변수
+
+### Admin Service
+- `DATABASE_URL`: SQLite DB 경로 (기본: `sqlite:///./llm_api.db`)
+- `ADMIN_SECRET_KEY`: JWT 시크릿 키
+- `USE_MOCK_EMAIL`: Mock 이메일 사용 여부 (기본: `true`)
+
+### Gateway Service
+- `DATABASE_URL`: SQLite DB 경로
+- `LLM_BACKEND_URL`: vLLM 서버 URL (기본: `http://host.containers.internal:8100`)
+- `ADMIN_HOST`: Admin 서비스 호스트
+- `ADMIN_PORT`: Admin 서비스 포트
 
 ## 보안 고려사항
 
@@ -380,122 +341,66 @@ curl http://localhost:8000/admin/api/usage?days=7 \
 
 - [ ] Admin 기본 비밀번호 변경
 - [ ] `ADMIN_SECRET_KEY` 환경 변수 변경
+- [ ] 이메일 도메인 화이트리스트 설정 (`allowed_email_domains`)
+- [ ] SMTP 설정 (`USE_MOCK_EMAIL=false`)
 - [ ] HTTPS 적용 (Nginx reverse proxy)
 - [ ] 내부망에서만 접근 가능하도록 방화벽 설정
 - [ ] SQLite 대신 PostgreSQL 사용 권장
-- [ ] API Key 저장소를 Secrets Manager로 이전
 - [ ] Rate limiting 값 조정
 - [ ] 로그 보관 정책 설정
-- [ ] Backup 설정
-
-### Nginx Reverse Proxy 예시
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name llm-api.company.internal;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # 긴 요청 타임아웃
-        proxy_read_timeout 300s;
-        proxy_connect_timeout 75s;
-    }
-}
-```
 
 ## 트러블슈팅
 
-### Gateway가 LLM Backend에 연결하지 못함
-
-```bash
-# 네트워크 확인
-docker network inspect llm-api-network
-
-# LLM Backend 상태 확인
-curl http://localhost:8001/health
-
-# 환경 변수 확인
-docker exec gateway-service env | grep LLM_BACKEND_URL
-```
-
-### Admin UI에서 로그인 실패
-
-```bash
-# Database 확인
-sqlite3 llm_api.db "SELECT * FROM admin_users;"
-
-# 기본 admin 계정 재생성
-docker exec -it admin-service python -c "
-from shared.database import SessionLocal, init_db
-from shared import crud
-init_db()
-db = SessionLocal()
-crud.create_admin_user(db, 'admin', 'admin123')
-"
-```
-
-### vLLM 연결 실패
+### Gateway가 vLLM에 연결하지 못함
 
 ```bash
 # vLLM 상태 확인
 curl http://localhost:8100/v1/models
 
-# vLLM 로그 확인
-docker logs vllm-server
-
-# GPU 확인
-nvidia-smi
+# 컨테이너 환경 변수 확인
+podman exec gateway-service env | grep LLM_BACKEND_URL
+# 출력되어야 함: LLM_BACKEND_URL=http://host.containers.internal:8100
 ```
 
-## 개발 가이드
-
-### 새 서비스 추가
-
-1. 서비스 디렉토리 생성 (예: `new_service/`)
-2. `Dockerfile.new-service` 생성
-3. `docker-compose.yml`에 서비스 추가
-4. Gateway에 라우팅 추가
-
-### 데이터베이스 마이그레이션
+### 이메일 인증 코드를 받지 못함
 
 ```bash
-# Alembic 설정 (선택)
-pip install alembic
-alembic init alembic
-# alembic/env.py 수정
-alembic revision --autogenerate -m "Initial migration"
-alembic upgrade head
+# Admin 로그에서 인증 코드 확인 (Mock 모드)
+podman logs admin-service | grep "Verification code"
+
+# 출력 예시:
+# [Mock Email] To: user@company.com
+# Verification code: 123456
+```
+
+### 컨테이너 포트가 이미 사용 중
+
+```bash
+# 기존 컨테이너 확인
+podman ps -a
+
+# 중지 및 삭제
+podman stop gateway-service admin-service
+podman rm gateway-service admin-service
 ```
 
 ## FAQ
 
+**Q: 왜 LLM Backend 서비스가 없나요?**
+A: Gateway가 vLLM을 직접 호출하여 구조를 간소화했습니다. 추가 프록시 레이어가 불필요합니다.
+
+**Q: Docker 대신 Podman을 사용하는 이유는?**
+A: 라이선스 이슈를 피하고, rootless 컨테이너 환경을 사용하기 위함입니다.
+
 **Q: API Key는 어디에 저장되나요?**
-A: SQLite 데이터베이스 (`llm_api.db`)에 저장됩니다. 프로덕션에서는 PostgreSQL이나 Secrets Manager 사용을 권장합니다.
+A: SQLite 데이터베이스 (`llm_api.db`)에 저장됩니다. Named volume으로 컨테이너 간 공유됩니다.
 
 **Q: Rate limiting은 분산 환경에서 작동하나요?**
-A: 현재는 인메모리 방식입니다. Redis 기반 분산 rate limiting으로 업그레이드 가능합니다.
+A: 현재는 인메모리 방식입니다. Redis 기반으로 업그레이드 가능합니다.
 
-**Q: 여러 vLLM 서버를 사용할 수 있나요?**
-A: Gateway에 로드 밸런싱 로직을 추가하여 가능합니다.
-
-**Q: 사용량 기반 과금을 구현할 수 있나요?**
-A: `request_logs` 테이블의 토큰 사용량 데이터를 활용하여 구현 가능합니다.
+**Q: 이메일 도메인 제한을 어떻게 설정하나요?**
+A: `shared/config.py`의 `allowed_email_domains` 리스트를 수정하세요.
 
 ## 라이선스
 
 내부 사용 전용. 외부 배포 금지.
-
-## 지원
-
-- 이슈: GitHub Issues
-- 사내 Slack: #llm-api-support
-- 이메일: llm-support@company.com

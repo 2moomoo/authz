@@ -75,10 +75,17 @@ async def health_check():
     llm_backend_healthy = False
     admin_healthy = False
 
+    # Check LLM backend (try /health first, fallback to /v1/models for vLLM)
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            llm_response = await client.get(f"{settings.llm_backend_url}/health")
-            llm_backend_healthy = llm_response.status_code == 200
+            # Try /health endpoint first
+            try:
+                llm_response = await client.get(f"{settings.llm_backend_url}/health")
+                llm_backend_healthy = llm_response.status_code == 200
+            except:
+                # Fallback to /v1/models for vLLM compatibility
+                llm_response = await client.get(f"{settings.llm_backend_url}/v1/models")
+                llm_backend_healthy = llm_response.status_code == 200
     except:
         pass
 

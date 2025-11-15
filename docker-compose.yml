@@ -1,62 +1,6 @@
 version: '3.8'
 
 services:
-  # vLLM service (GPU-backed LLM server)
-  vllm:
-    image: vllm/vllm-openai:latest
-    container_name: vllm-server
-    runtime: nvidia  # Requires nvidia-docker
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-    command: >
-      --model meta-llama/Llama-2-7b-chat-hf
-      --host 0.0.0.0
-      --port 8100
-      --dtype auto
-      --max-model-len 4096
-    ports:
-      - "8100:8100"
-    volumes:
-      - ~/.cache/huggingface:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8100/v1/models"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-
-  # LLM Backend Service (vLLM Proxy)
-  llm-backend:
-    build:
-      context: .
-      dockerfile: llm_backend/Dockerfile
-    container_name: llm-backend
-    ports:
-      - "8001:8001"
-    environment:
-      - VLLM_BASE_URL=http://vllm:8100
-      - VLLM_DEFAULT_MODEL=meta-llama/Llama-2-7b-chat-hf
-    depends_on:
-      vllm:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - llm-api-network
-
-  # Admin Service (API Key Management)
   admin:
     build:
       context: .
@@ -65,21 +9,19 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ./llm_api.db:/app/llm_api.db
+      - db-data:/app
     environment:
       - DATABASE_URL=sqlite:///./llm_api.db
       - ADMIN_SECRET_KEY=change-this-secret-key-in-production
+      - USE_MOCK_EMAIL=true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
-    networks:
-      - llm-api-network
+      start_period: 40s
 
-  # Gateway Service (Auth + Routing)
   gateway:
     build:
       context: .
@@ -88,16 +30,15 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./llm_api.db:/app/llm_api.db
+      - db-data:/app
     environment:
       - DATABASE_URL=sqlite:///./llm_api.db
-      - LLM_BACKEND_URL=http://llm-backend:8001
+      - LLM_BACKEND_URL=http://host.docker.internal:8100
       - ADMIN_HOST=admin
       - ADMIN_PORT=8002
-      - VLLM_BASE_URL=http://vllm:8100
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      llm-backend:
-        condition: service_healthy
       admin:
         condition: service_healthy
     restart: unless-stopped
@@ -107,9 +48,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    networks:
-      - llm-api-network
 
-networks:
-  llm-api-network:
-    driver: bridge
+volumes:
+  db-data:
+    driver: local

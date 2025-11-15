@@ -26,6 +26,7 @@ wheels/
 # Logs
 logs/
 *.log
+*.pid
 
 # Environment
 .env

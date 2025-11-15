@@ -19,21 +19,9 @@
 
 ## 빠른 시작
 
-### 사전 준비
+### 사전 준비: vLLM 설치 및 실행
 
-**Fedora Linux (WSL2):**
-```bash
-# Podman 설치 확인
-podman --version
-
-# NVIDIA Container Toolkit 설치 (GPU 사용 시)
-curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | \
-  sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo
-sudo dnf install -y nvidia-container-toolkit
-sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
-```
-
-### 1. vLLM 설치 및 실행
+모든 실행 방법 공통으로 vLLM을 먼저 실행해야 합니다.
 
 ```bash
 # vLLM 설치
@@ -49,27 +37,45 @@ python -m vllm.entrypoints.openai.api_server \
 curl http://localhost:8100/v1/models
 ```
 
-### 2. 컨테이너 이미지 빌드
+### 방법 1: Docker Compose (권장)
+
+가장 간단한 방법입니다.
 
 ```bash
-# Admin 이미지
-podman build -t authz-admin:latest -f admin/Dockerfile .
+# 서비스 시작
+docker compose up -d
 
-# Gateway 이미지
-podman build -t authz-gateway:latest -f gateway/Dockerfile .
+# 로그 확인
+docker compose logs -f
+
+# 서비스 중지
+docker compose down
 ```
 
-### 3. 서비스 실행
+### 방법 2: 로컬 실행 (개발용)
+
+Python 가상환경에서 직접 실행합니다.
+
+```bash
+# 서비스 시작 (자동으로 의존성 설치)
+./run_local.sh
+
+# 로그 확인
+tail -f logs/gateway.log
+tail -f logs/admin.log
+
+# 서비스 중지
+pkill -f 'uvicorn admin.main:app'
+pkill -f 'uvicorn gateway.main:app'
+```
+
+### 방법 3: Podman (선택사항)
+
+Podman을 사용하는 경우:
 
 ```bash
 ./run_simple.sh
 ```
-
-이 스크립트는 다음을 실행합니다:
-- Admin Service (포트 8002)
-- Gateway Service (포트 8000)
-
-**중요**: 컨테이너가 호스트의 vLLM에 접근하기 위해 `host.containers.internal:8100`을 사용합니다.
 
 ## 서비스 구성
 
@@ -201,6 +207,11 @@ authz/
 │
 ├── admin/                   # Admin Service
 │   ├── main.py             # Admin API + UI
+│   ├── ui/                 # Web UI files
+│   │   ├── index.html      # Admin dashboard
+│   │   ├── app.js
+│   │   ├── user.html       # Self-service portal
+│   │   └── user.js
 │   ├── requirements.txt
 │   └── Dockerfile
 │
@@ -212,25 +223,43 @@ authz/
 │   ├── email_service.py    # 이메일 인증
 │   └── requirements.txt
 │
-├── run_simple.sh           # 실행 스크립트
-├── test_system.py          # 통합 테스트
-├── SIMPLE_VERSION.md       # 상세 가이드
-└── README.md              # 이 문서
+├── docker-compose.yml      # Docker Compose 설정
+├── run_local.sh           # 로컬 실행 스크립트 (개발용)
+├── run_simple.sh          # Podman 실행 스크립트 (선택)
+├── test_system.py         # 통합 테스트
+├── .env.example           # 환경 변수 예시
+├── SIMPLE_VERSION.md      # 상세 가이드
+└── README.md             # 이 문서
 ```
 
 ## 모니터링
 
 ### 로그 확인
 
+**Docker Compose:**
 ```bash
-# Gateway 로그
-podman logs --tail 100 gateway-service
+# 전체 로그
+docker compose logs -f
 
-# Admin 로그
-podman logs --tail 100 admin-service
+# 특정 서비스 로그
+docker compose logs -f gateway
+docker compose logs -f admin
+```
+
+**로컬 실행:**
+```bash
+# 로그 파일 확인
+tail -f logs/gateway.log
+tail -f logs/admin.log
 
 # 실시간 모니터링
-watch -n 2 "podman logs --tail 20 gateway-service"
+watch -n 2 "tail -20 logs/gateway.log"
+```
+
+**Podman:**
+```bash
+podman logs --tail 100 gateway-service
+podman logs --tail 100 admin-service
 ```
 
 ### Health Checks
@@ -245,36 +274,51 @@ curl http://localhost:8002/health  # Admin
 
 ## 관리
 
-### 서비스 중지
+### Docker Compose
 
 ```bash
-podman stop gateway-service admin-service
-```
+# 서비스 중지
+docker compose stop
 
-### 서비스 재시작
+# 서비스 재시작
+docker compose restart
 
-```bash
-podman restart gateway-service admin-service
-```
+# 서비스 삭제 (볼륨 유지)
+docker compose down
 
-### 서비스 삭제
-
-```bash
-podman stop gateway-service admin-service
-podman rm gateway-service admin-service
-```
-
-### 컨테이너 재빌드
-
-```bash
-# 이미지 삭제
-podman rmi authz-gateway:latest authz-admin:latest
+# 서비스 삭제 (볼륨 포함)
+docker compose down -v
 
 # 재빌드
-podman build -t authz-admin:latest -f admin/Dockerfile .
-podman build -t authz-gateway:latest -f gateway/Dockerfile .
+docker compose build
+docker compose up -d
+```
 
-# 재실행
+### 로컬 실행
+
+```bash
+# 서비스 중지
+pkill -f 'uvicorn admin.main:app'
+pkill -f 'uvicorn gateway.main:app'
+
+# 또는 PID 파일 사용
+kill $(cat logs/admin.pid)
+kill $(cat logs/gateway.pid)
+
+# 재시작
+./run_local.sh
+```
+
+### Podman
+
+```bash
+# 서비스 중지
+podman stop gateway-service admin-service
+
+# 서비스 재시작
+podman restart gateway-service admin-service
+
+# 재빌드
 ./run_simple.sh
 ```
 
